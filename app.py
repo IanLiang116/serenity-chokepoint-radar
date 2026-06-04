@@ -92,14 +92,14 @@ def serenity_score(row: pd.Series) -> float:
 
 def action_band(score: float, risk: float) -> str:
     if score >= 75 and risk <= 4:
-        return "Core watch"
+        return "核心觀察"
     if score >= 65:
-        return "High-vol watch"
+        return "高波動觀察"
     if score >= 50:
-        return "Wait for catalyst"
+        return "等待催化"
     if score >= 35:
-        return "Track only"
-    return "Avoid / scenario only"
+        return "僅追蹤"
+    return "避開 / 僅作情境工具"
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -233,48 +233,48 @@ def format_pct(value: float | None) -> str:
 
 
 def render_methodology() -> None:
-    st.subheader("Serenity-like logic")
+    st.subheader("Serenity 風格邏輯")
     st.markdown(
         """
-This radar turns Serenity's public chokepoint style into a repeatable process.
+這個雷達把 Serenity 公開展現出的 chokepoint 研究方法，整理成可重複的流程。
 
-1. Start from a confirmed demand wave: AI data centers, CPO, silicon photonics, 800V power, cooling, advanced packaging.
-2. Move upstream and ask which suppliers are hard to replace.
-3. Prefer physical bottlenecks: substrates, lasers, optical engines, test, packaging, power, cooling, specialty materials.
-4. Look for catalysts: qualification orders, capacity expansion, CHIPS Act funding, backlog, new facility, index or listing events.
-5. Penalize risk: dilution, ATM offerings, weak balance sheet, delisting risk, crowded large-cap trades.
+1. 從已確認的大需求開始：AI data center、CPO、silicon photonics、800V power、散熱、advanced packaging。
+2. 往上游拆供應鏈，找出難以替代的供應商。
+3. 優先找物理卡點：substrate、laser、optical engine、testing、packaging、power、cooling、specialty materials。
+4. 尋找催化：qualification order、產能擴張、CHIPS Act、backlog、新廠、指數納入或上市事件。
+5. 風險扣分：dilution、ATM offering、資產負債表弱、下市風險、過度擁擠的大型股交易。
 
-V1 showed Serenity-related names. V2 adds an automatic scanner that searches a broader candidate pool using the same logic.
+V1 是 Serenity 已知標的雷達。V2 新增自動掃描器，會用同樣邏輯去更大的候選池裡找新標的。
         """
     )
-    st.info("Research tool only. It finds candidates for deeper work; it does not make buy or sell recommendations.")
+    st.info("這是研究工具，只用來找值得深入研究的候選股，不是買賣建議。")
 
 
 def render_auto_scan(universe: pd.DataFrame) -> None:
-    st.subheader("Auto scanner: find new Serenity-like candidates")
+    st.subheader("自動掃描器：尋找新的 Serenity-like 候選股")
     st.write(
-        "This scan checks a broader candidate pool across photonics, power semis, advanced packaging, "
-        "testing, data-center power/cooling, and specialty materials. It uses public company descriptions "
-        "and Yahoo news snippets, then explains the keyword evidence."
+        "這個掃描器會檢查更廣的候選池，包含 photonics、功率半導體、advanced packaging、"
+        "半導體測試、data-center power/cooling、specialty materials。它會讀公開公司描述與 Yahoo 新聞摘要，"
+        "再列出命中的關鍵字證據。"
     )
-    limit = st.slider("Scan limit", 5, 60, 25, 5)
+    limit = st.slider("掃描數量", 5, 60, 25, 5)
     col_a, col_b = st.columns([1, 3])
     with col_a:
-        run_auto = st.button("Run auto scan")
+        run_auto = st.button("執行自動掃描")
     with col_b:
-        st.caption(f"Candidate file: {scanner.CANDIDATE_FILE}")
+        st.caption(f"候選池檔案：{scanner.CANDIDATE_FILE}")
 
     if run_auto:
-        with st.spinner("Scanning public company data and news..."):
+        with st.spinner("正在掃描公開公司資料與新聞..."):
             result = scanner.run_auto_scan(limit=limit)
-        st.success(f"Scan complete: {len(result)} candidates")
+        st.success(f"掃描完成：{len(result)} 個候選股")
     elif AUTO_SCAN_FILE.exists():
         result = pd.read_csv(AUTO_SCAN_FILE)
     else:
         result = pd.DataFrame()
 
     if result.empty:
-        st.caption("No auto-scan result yet. Press Run auto scan.")
+        st.caption("目前還沒有自動掃描結果。請按「執行自動掃描」。")
         return
 
     known = set(universe["ticker"].astype(str).str.upper())
@@ -296,14 +296,14 @@ def render_auto_scan(universe: pd.DataFrame) -> None:
     ]
     st.dataframe(result[display_cols].head(80), use_container_width=True, hide_index=True)
 
-    selected = st.selectbox("Inspect auto-scan candidate", result["ticker"].tolist())
+    selected = st.selectbox("查看自動掃描候選股", result["ticker"].tolist())
     row = result[result["ticker"] == selected].iloc[0]
     st.markdown(f"### {row['ticker']} - {row['name']}")
-    st.write(f"Theme: {row.get('theme', '-')}")
-    st.write(f"Market cap: {format_money(row.get('market_cap'))}")
-    st.write(f"Positive evidence: {row.get('positive_hits') or '-'}")
-    st.write(f"Negative evidence: {row.get('negative_hits') or '-'}")
-    st.write(row.get("evidence") or "No company profile evidence returned.")
+    st.write(f"主題：{row.get('theme', '-')}")
+    st.write(f"市值：{format_money(row.get('market_cap'))}")
+    st.write(f"正面證據：{row.get('positive_hits') or '-'}")
+    st.write(f"風險證據：{row.get('negative_hits') or '-'}")
+    st.write(row.get("evidence") or "沒有抓到公司描述證據。")
     if row.get("news_evidence"):
         st.caption(row.get("news_evidence"))
 
@@ -311,25 +311,25 @@ def render_auto_scan(universe: pd.DataFrame) -> None:
 def main() -> None:
     st.set_page_config(page_title="Serenity Chokepoint Radar", layout="wide")
     st.title("Serenity Chokepoint Radar")
-    st.caption("Local research dashboard for Serenity-style supply-chain chokepoint stock discovery.")
+    st.caption("用 Serenity 風格的 AI 供應鏈卡點邏輯，尋找值得關注的候選股。")
 
     universe = load_universe()
     universe["serenity_score"] = universe.apply(serenity_score, axis=1)
     universe["action"] = universe.apply(lambda r: action_band(r["serenity_score"], r["risk_level"]), axis=1)
 
     with st.sidebar:
-        st.header("Filters")
-        categories = ["All"] + sorted(universe["category"].unique().tolist())
-        category = st.selectbox("Category", categories)
-        min_score = st.slider("Minimum Serenity score", 0, 100, 45)
-        hide_scenario = st.checkbox("Hide leveraged/scenario tools", value=True)
+        st.header("篩選")
+        categories = ["全部"] + sorted(universe["category"].unique().tolist())
+        category = st.selectbox("類別", categories)
+        min_score = st.slider("最低 Serenity 分數", 0, 100, 45)
+        hide_scenario = st.checkbox("隱藏槓桿 / 情境工具", value=True)
         st.divider()
-        st.header("Manual source scan")
-        source_text = st.text_area("URLs, one per line", "\n".join(DEFAULT_SOURCES), height=120)
-        run_scan = st.button("Scan pasted sources")
+        st.header("手動來源掃描")
+        source_text = st.text_area("URL，一行一個", "\n".join(DEFAULT_SOURCES), height=120)
+        run_scan = st.button("掃描貼上的來源")
 
     filtered = universe.copy()
-    if category != "All":
+    if category != "全部":
         filtered = filtered[filtered["category"] == category]
     if hide_scenario:
         filtered = filtered[filtered["status"].str.lower() != "scenario"]
@@ -342,7 +342,7 @@ def main() -> None:
         col.metric(row["ticker"], f"{row['serenity_score']:.1f}", delta=format_pct(snap.change_pct), help=row["thesis"])
 
     tab_radar, tab_auto, tab_manual, tab_detail, tab_method = st.tabs(
-        ["Known radar", "Auto scanner", "Manual scan", "Details", "Method"]
+        ["已知雷達", "自動掃描", "手動掃描", "標的細節", "方法論"]
     )
 
     with tab_radar:
@@ -366,7 +366,7 @@ def main() -> None:
         render_auto_scan(universe)
 
     with tab_manual:
-        st.write("Paste public pages to scan for ticker mentions and Serenity-style keywords.")
+        st.write("貼上公開網頁，系統會掃描 ticker 與 Serenity 風格關鍵字。")
         if run_scan:
             urls = [line.strip() for line in source_text.splitlines() if line.strip()]
             known_full = set(universe["ticker"].str.upper())
@@ -374,24 +374,24 @@ def main() -> None:
             scan = scan_sources(urls, known_full | known_short)
             known = known_full | known_short
             if scan.empty:
-                st.warning("No tickers found. The source may block scraping or require login.")
+                st.warning("沒有找到 ticker。來源可能阻擋抓取，或需要登入。")
             else:
                 scan["known_in_universe"] = scan["ticker"].str.upper().isin(known)
                 st.dataframe(scan.head(80), use_container_width=True, hide_index=True)
         else:
-            st.caption("Press Scan pasted sources to fetch public pages.")
+            st.caption("按「掃描貼上的來源」後，才會讀取公開頁面。")
 
     with tab_detail:
-        selected = st.selectbox("Select ticker", filtered["ticker"].tolist() if not filtered.empty else universe["ticker"].tolist())
+        selected = st.selectbox("選擇標的", filtered["ticker"].tolist() if not filtered.empty else universe["ticker"].tolist())
         row = universe[universe["ticker"] == selected].iloc[0]
         left, right = st.columns([1, 2])
         snap = fetch_yahoo_snapshot(selected)
         with left:
-            st.metric("Serenity score", f"{serenity_score(row):.1f}")
-            st.metric("Price", format_money(snap.price), format_pct(snap.change_pct))
-            st.metric("Market cap", format_money(snap.market_cap))
-            st.write(f"Action: {action_band(serenity_score(row), row['risk_level'])}")
-            st.write(f"Risk: {int(row['risk_level'])}/5")
+            st.metric("Serenity 分數", f"{serenity_score(row):.1f}")
+            st.metric("價格", format_money(snap.price), format_pct(snap.change_pct))
+            st.metric("市值", format_money(snap.market_cap))
+            st.write(f"行動分類：{action_band(serenity_score(row), row['risk_level'])}")
+            st.write(f"風險：{int(row['risk_level'])}/5")
         with right:
             st.subheader(row["name"])
             st.write(row["thesis"])
@@ -399,14 +399,14 @@ def main() -> None:
             if not chart.empty:
                 st.line_chart(chart.set_index("date")["close"])
             else:
-                st.warning("Yahoo Finance did not return price history for this ticker.")
+                st.warning("Yahoo Finance 沒有回傳這個 ticker 的歷史價格。")
 
     with tab_method:
         render_methodology()
-        st.subheader("Files")
-        st.write(f"Known universe: {DATA_FILE}")
-        st.write(f"Auto candidates: {scanner.CANDIDATE_FILE}")
-        st.write(f"Auto scan output: {AUTO_SCAN_FILE}")
+        st.subheader("檔案")
+        st.write(f"已知 Serenity universe：{DATA_FILE}")
+        st.write(f"自動掃描候選池：{scanner.CANDIDATE_FILE}")
+        st.write(f"自動掃描輸出：{AUTO_SCAN_FILE}")
 
 
 if __name__ == "__main__":
