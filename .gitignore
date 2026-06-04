@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+.serenity_cache/
+.streamlit/secrets.toml
+data/auto_scan_results.csv

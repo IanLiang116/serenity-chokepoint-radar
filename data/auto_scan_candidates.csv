@@ -1,0 +1,51 @@
+ticker,name,theme,region
+POET,POET Technologies,Silicon photonics and optical engines,US
+IPGP,IPG Photonics,Industrial lasers and photonics,US
+LASR,nLIGHT,Semiconductor lasers,US
+MTSI,MACOM Technology Solutions,Optical and RF semiconductors,US
+FN,Fabrinet,Optical manufacturing,US
+IIVI,Coherent legacy alias,Optical components,US
+ONTO,Onto Innovation,Advanced packaging metrology,US
+ACMR,ACM Research,Semiconductor equipment,US
+ACLS,Axcelis Technologies,Ion implantation equipment,US
+VECO,Veeco Instruments,Compound semi equipment,US
+FORM,FormFactor,Semiconductor probe cards,US
+TER,Teradyne,Semiconductor test,US
+COHU,Cohu,Semiconductor test handlers,US
+AMKR,Amkor Technology,Advanced packaging,US
+AEIS,Advanced Energy Industries,Power conversion and process power,US
+VRT,Vertiv,Data center power and cooling,US
+ETN,Eaton,Electrical equipment and data center power,US
+PWR,Quanta Services,Power grid infrastructure,US
+SMR,NuScale Power,Energy for data centers,US
+CEG,Constellation Energy,Nuclear power for data centers,US
+NVT,nVent Electric,Electrical enclosures and cooling,US
+ALAB,Astera Labs,AI connectivity semiconductors,US
+CRDO,Credo Technology,High-speed connectivity,US
+MRAM,Everspin Technologies,Specialty memory,US
+RMBS,Rambus,Memory interface IP,US
+LSCC,Lattice Semiconductor,Low-power FPGA and edge AI,US
+DIOD,Diodes Incorporated,Power and analog semiconductors,US
+POWI,Power Integrations,Power semiconductors,US
+SMTC,Semtech,Signal integrity and connectivity,US
+ENTG,Entegris,Semiconductor materials and filters,US
+KLIC,Kulicke and Soffa,Advanced packaging equipment,US
+UCTT,Ultra Clean Holdings,Semiconductor subsystems,US
+MKSI,MKS Instruments,Process control and photonics,US
+CAMT,Camtek,Inspection and metrology,US
+WDC,Western Digital,Storage and NAND,US
+ST,STMicroelectronics,Power semiconductors,Europe
+IFNNY,Infineon Technologies,Power semiconductors,Europe
+ONON,On Holding unrelated sanity check,US
+6723.T,TOWA,Semiconductor molding and packaging equipment,Japan
+6526.T,Socionext,Custom silicon,Japan
+7735.T,SCREEN Holdings,Semiconductor equipment,Japan
+6146.T,Disco,Wafer dicing and grinding,Japan
+6920.T,Lasertec,EUV mask inspection,Japan
+3443.T,GlobalWafers,Silicon wafers,Taiwan
+3533.TW,LOTES,Connectors and cooling,Taiwan
+3653.TW,Jentech,AI server cooling and components,Taiwan
+3017.TW,Asia Vital Components,Thermal solutions,Taiwan
+3324.TWO,AURAS Technology,Thermal modules,Taiwan
+6515.TW,WinWay Technology,Probe cards,Taiwan
+6781.TW,AES-KY,Battery and power modules,Taiwan
