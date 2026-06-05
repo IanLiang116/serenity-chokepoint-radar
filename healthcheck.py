@@ -5,6 +5,7 @@ import sys
 import pandas as pd
 
 import app
+import market_health
 import scanner
 
 
@@ -48,6 +49,10 @@ def main() -> int:
     text_score = scanner.score_text("CPO silicon photonics InP bottleneck dilution")
     if text_score[0] <= 0 or text_score[1] <= 0:
         print("scanner keyword scoring failed")
+        return 1
+    factors, diagnosis = market_health.score_market_health(pd.DataFrame())
+    if factors.empty or not 0 <= diagnosis.score <= 100:
+        print("market health fallback failed")
         return 1
     print(f"ok: {len(universe)} known tickers, {len(candidates)} auto candidates, top score {scores.max():.1f}")
     return 0

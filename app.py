@@ -10,7 +10,9 @@ import pandas as pd
 import requests
 import streamlit as st
 
+import market_health
 import scanner
+import strategy
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -59,6 +61,28 @@ class PriceSnapshot:
     market_cap: float | None
 
 
+def inject_css() -> None:
+    st.markdown(
+        """
+        <style>
+        .main .block-container { padding-top: 1.2rem; max-width: 1280px; }
+        h1, h2, h3 { letter-spacing: 0; }
+        .status-band {
+            border-left: 5px solid #2563eb;
+            padding: 0.85rem 1rem;
+            background: #f8fafc;
+            margin: 0.5rem 0 1rem;
+        }
+        .factor-note {
+            font-size: 0.92rem;
+            color: #475569;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def load_universe() -> pd.DataFrame:
     df = pd.read_csv(DATA_FILE)
     numeric_cols = [
@@ -83,23 +107,24 @@ def serenity_score(row: pd.Series) -> float:
         + row["institutional_front_run"] * 14
         - row["risk_level"] * 10
     )
-    if str(row.get("status", "")).lower() == "flipped":
+    status = str(row.get("status", "")).lower()
+    if status == "flipped":
         raw -= 25
-    if str(row.get("status", "")).lower() == "scenario":
+    if status == "scenario":
         raw -= 20
     return max(0, min(100, round(raw / 4.0, 1)))
 
 
 def action_band(score: float, risk: float) -> str:
     if score >= 75 and risk <= 4:
-        return "核心觀察"
+        return "核心觀察 / 可積極研究"
     if score >= 65:
-        return "高波動觀察"
+        return "偏強候選 / 等回檔"
     if score >= 50:
-        return "等待催化"
+        return "觀察清單 / 等催化"
     if score >= 35:
-        return "僅追蹤"
-    return "避開 / 僅作情境工具"
+        return "保守追蹤"
+    return "避開 / 風險優先"
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -113,9 +138,7 @@ def fetch_yahoo_snapshot(ticker: str) -> PriceSnapshot:
         meta = result.get("meta", {})
         price = meta.get("regularMarketPrice")
         prev = meta.get("chartPreviousClose") or meta.get("previousClose")
-        change = None
-        if price and prev:
-            change = (price / prev - 1) * 100
+        change = (price / prev - 1) * 100 if price and prev else None
         return PriceSnapshot(
             price=float(price) if price is not None else None,
             change_pct=float(change) if change is not None else None,
@@ -129,7 +152,7 @@ def fetch_yahoo_snapshot(ticker: str) -> PriceSnapshot:
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_yahoo_history(ticker: str) -> pd.DataFrame:
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-    params = {"range": "3mo", "interval": "1d"}
+    params = {"range": "6mo", "interval": "1d"}
     try:
         r = requests.get(url, params=params, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
@@ -139,10 +162,15 @@ def fetch_yahoo_history(ticker: str) -> pd.DataFrame:
         rows = []
         for ts, close in zip(timestamps, closes):
             if close is not None:
-                rows.append({"date": datetime.fromtimestamp(ts).date(), "close": close})
+                rows.append({"date": datetime.fromtimestamp(ts), "close": close})
         return pd.DataFrame(rows)
     except Exception:
         return pd.DataFrame(columns=["date", "close"])
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_market_prices() -> pd.DataFrame:
+    return market_health.load_market_prices()
 
 
 def load_text_from_url(url: str) -> str:
@@ -186,7 +214,7 @@ def extract_ticker_mentions(text: str, known_tickers: Iterable[str] = ()) -> dic
 
 
 def scan_sources(urls: Iterable[str], known_tickers: Iterable[str] = ()) -> pd.DataFrame:
-    combined: dict[str, dict[str, int | str]] = {}
+    combined: dict[str, dict[str, int | str | set[str]]] = {}
     for url in urls:
         text = load_text_from_url(url)
         for ticker, item in extract_ticker_mentions(text, known_tickers).items():
@@ -196,18 +224,20 @@ def scan_sources(urls: Iterable[str], known_tickers: Iterable[str] = ()) -> pd.D
             )
             current["mentions"] = int(current["mentions"]) + int(item["count"])
             current["keyword_score"] = int(current["keyword_score"]) + int(item["keyword_score"])
+            assert isinstance(current["sources"], set)
             current["sources"].add(url)
             if not current["context"]:
                 current["context"] = str(item["context"])
 
     rows = []
     for ticker, item in combined.items():
+        sources = item["sources"]
         rows.append(
             {
                 "ticker": ticker,
                 "mentions": item["mentions"],
                 "keyword_score": item["keyword_score"],
-                "sources": ", ".join(sorted(item["sources"])),
+                "sources": ", ".join(sorted(sources)) if isinstance(sources, set) else "",
                 "context": item["context"],
             }
         )
@@ -232,49 +262,146 @@ def format_pct(value: float | None) -> str:
     return f"{value:+.2f}%"
 
 
-def render_methodology() -> None:
-    st.subheader("Serenity 風格邏輯")
-    st.markdown(
-        """
-這個雷達把 Serenity 公開展現出的 chokepoint 研究方法，整理成可重複的流程。
+def render_market_health() -> None:
+    st.subheader("即時市場健康指數")
+    st.caption("用人體健康模型分析金融市場：流動性像血液，波動率像血壓，信用槓桿像慢性病，趨勢像肌肉力量。")
 
-1. 從已確認的大需求開始：AI data center、CPO、silicon photonics、800V power、散熱、advanced packaging。
-2. 往上游拆供應鏈，找出難以替代的供應商。
-3. 優先找物理卡點：substrate、laser、optical engine、testing、packaging、power、cooling、specialty materials。
-4. 尋找催化：qualification order、產能擴張、CHIPS Act、backlog、新廠、指數納入或上市事件。
-5. 風險扣分：dilution、ATM offering、資產負債表弱、下市風險、過度擁擠的大型股交易。
+    if st.button("重新抓取市場資料"):
+        cached_market_prices.clear()
 
-V1 是 Serenity 已知標的雷達。V2 新增自動掃描器，會用同樣邏輯去更大的候選池裡找新標的。
-        """
+    prices = cached_market_prices()
+    factors, diagnosis = market_health.score_market_health(prices)
+    playbook = market_health.scenario_playbook(diagnosis, factors)
+
+    m1, m2, m3 = st.columns([1, 1, 2])
+    m1.metric("MHI 市場健康指數", f"{diagnosis.score:.1f}/100")
+    m2.metric("市場狀態", diagnosis.regime)
+    m3.markdown(
+        f"""
+        <div class="status-band">
+        <strong>操作姿態：</strong>{diagnosis.posture}<br>
+        <span class="factor-note">{diagnosis.explanation}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.info("這是研究工具，只用來找值得深入研究的候選股，不是買賣建議。")
+
+    left, right = st.columns([1.15, 1])
+    with left:
+        chart_data = factors.set_index("label")["score"] if not factors.empty else pd.Series(dtype=float)
+        st.bar_chart(chart_data, height=330)
+    with right:
+        st.dataframe(
+            factors[["label", "score", "diagnosis", "signal"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.subheader("情境拆解與交易應對")
+    st.dataframe(playbook, use_container_width=True, hide_index=True)
+
+    st.subheader("市場代理指標")
+    snapshot = market_health.latest_snapshot(prices)
+    if snapshot.empty:
+        st.warning("目前無法取得 Yahoo Finance 市場資料，請稍後重試或確認網路。")
+    else:
+        display = snapshot.copy()
+        for col in ["1d", "1m", "3m"]:
+            display[col] = display[col].map(lambda x: market_health.pct(x))
+        display["latest"] = display["latest"].map(lambda x: f"{x:,.2f}")
+        st.dataframe(display, use_container_width=True, hide_index=True)
+
+    with st.expander("模型權重與限制"):
+        st.dataframe(market_health.factor_weights_frame(), use_container_width=True, hide_index=True)
+        st.write(
+            "估值、信用與景氣使用 ETF/指數代理資料，適合做即時風險儀表板；正式交易仍應搭配財報、利率、信用利差、部位大小與停損規則。"
+        )
+        st.caption(f"資料時間：{market_health.data_timestamp(prices)}")
+
+
+def render_momentum_strategy() -> None:
+    st.subheader("月線動能策略")
+    st.caption("以 QQQ、SPY、SHY 做 12 個月相對動能。這是規則型參考，不是保證獲利。")
+    if st.button("更新動能策略"):
+        with st.spinner("抓取 Yahoo 調整收盤價並重新回測..."):
+            signals, stats, signal = strategy.run(write=True)
+    else:
+        try:
+            signals, stats, signal = strategy.run(write=False)
+        except Exception as exc:
+            st.error(f"策略資料取得失敗：{exc}")
+            return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("最新訊號月份", str(signal["signal_date"]))
+    c2.metric("建議持有", str(signal["recommended_holding"]))
+    c3.metric("QQQ 12M", f"{float(signal['qqq_12m_return']):.2%}")
+    c4.metric("SPY 12M", f"{float(signal['spy_12m_return']):.2%}")
+
+    stats_df = pd.DataFrame(
+        [
+            {
+                "策略": item.name,
+                "CAGR": f"{item.cagr:.2%}",
+                "波動": f"{item.volatility:.2%}",
+                "Sharpe": f"{item.sharpe:.2f}",
+                "最大回撤": f"{item.max_drawdown:.2%}",
+                "$1 成長": f"{item.growth_multiple:.2f}x",
+            }
+            for item in stats
+        ]
+    )
+    st.dataframe(stats_df, use_container_width=True, hide_index=True)
+    st.line_chart(
+        signals.tail(48).set_index("holding_month")["strategy_return"],
+        height=260,
+    )
+
+
+def render_serenity_radar(universe: pd.DataFrame, filtered: pd.DataFrame) -> None:
+    st.subheader("Serenity Chokepoint Radar")
+    st.caption("尋找 AI 基礎設施、半導體、光通訊、封裝、電力與材料供應鏈中的瓶頸型公司。")
+
+    top = filtered.head(5)
+    cols = st.columns(5)
+    for col, (_, row) in zip(cols, top.iterrows()):
+        snap = fetch_yahoo_snapshot(row["ticker"])
+        col.metric(row["ticker"], f"{row['serenity_score']:.1f}", delta=format_pct(snap.change_pct), help=row["thesis"])
+
+    table = filtered[
+        [
+            "ticker",
+            "name",
+            "category",
+            "layer",
+            "conviction",
+            "status",
+            "serenity_score",
+            "risk_level",
+            "action",
+            "thesis",
+        ]
+    ].copy()
+    st.dataframe(table, use_container_width=True, hide_index=True)
 
 
 def render_auto_scan(universe: pd.DataFrame) -> None:
-    st.subheader("自動掃描器：尋找新的 Serenity-like 候選股")
-    st.write(
-        "這個掃描器會檢查更廣的候選池，包含 photonics、功率半導體、advanced packaging、"
-        "半導體測試、data-center power/cooling、specialty materials。它會讀公開公司描述與 Yahoo 新聞摘要，"
-        "再列出命中的關鍵字證據。"
-    )
+    st.subheader("Auto scanner")
+    st.caption("從候選清單抓 Yahoo quote/profile/news，尋找具 chokepoint、scarcity、catalyst 特徵的公司。")
     limit = st.slider("掃描數量", 5, 60, 25, 5)
-    col_a, col_b = st.columns([1, 3])
-    with col_a:
-        run_auto = st.button("執行自動掃描")
-    with col_b:
-        st.caption(f"候選池檔案：{scanner.CANDIDATE_FILE}")
+    run_auto = st.button("執行 auto scan")
 
     if run_auto:
-        with st.spinner("正在掃描公開公司資料與新聞..."):
+        with st.spinner("掃描候選公司中..."):
             result = scanner.run_auto_scan(limit=limit)
-        st.success(f"掃描完成：{len(result)} 個候選股")
+        st.success(f"完成：{len(result)} 筆候選")
     elif AUTO_SCAN_FILE.exists():
         result = pd.read_csv(AUTO_SCAN_FILE)
     else:
         result = pd.DataFrame()
 
     if result.empty:
-        st.caption("目前還沒有自動掃描結果。請按「執行自動掃描」。")
+        st.info("尚無 auto scan 結果。")
         return
 
     known = set(universe["ticker"].astype(str).str.upper())
@@ -294,119 +421,137 @@ def render_auto_scan(universe: pd.DataFrame) -> None:
         "negative_hits",
         "already_in_serenity_pool",
     ]
-    st.dataframe(result[display_cols].head(80), use_container_width=True, hide_index=True)
+    available = [col for col in display_cols if col in result.columns]
+    st.dataframe(result[available].head(80), use_container_width=True, hide_index=True)
 
-    selected = st.selectbox("查看自動掃描候選股", result["ticker"].tolist())
+    selected = st.selectbox("查看候選細節", result["ticker"].tolist())
     row = result[result["ticker"] == selected].iloc[0]
-    st.markdown(f"### {row['ticker']} - {row['name']}")
+    st.markdown(f"### {row.get('ticker')} - {row.get('name')}")
     st.write(f"主題：{row.get('theme', '-')}")
     st.write(f"市值：{format_money(row.get('market_cap'))}")
-    st.write(f"正面證據：{row.get('positive_hits') or '-'}")
-    st.write(f"風險證據：{row.get('negative_hits') or '-'}")
-    st.write(row.get("evidence") or "沒有抓到公司描述證據。")
+    st.write(f"正面線索：{row.get('positive_hits') or '-'}")
+    st.write(f"風險線索：{row.get('negative_hits') or '-'}")
+    st.write(row.get("evidence") or "沒有摘要證據。")
     if row.get("news_evidence"):
         st.caption(row.get("news_evidence"))
 
 
-def main() -> None:
-    st.set_page_config(page_title="Serenity Chokepoint Radar", layout="wide")
-    st.title("Serenity Chokepoint Radar")
-    st.caption("用 Serenity 風格的 AI 供應鏈卡點邏輯，尋找值得關注的候選股。")
+def render_manual_scan(universe: pd.DataFrame) -> None:
+    st.subheader("手動來源掃描")
+    st.caption("貼上網站 URL，掃描 ticker 與瓶頸關鍵字。適合追蹤特定社群、新聞頁或產業網站。")
+    source_text = st.text_area("URL，一行一個", "\n".join(DEFAULT_SOURCES), height=130)
+    run_scan = st.button("掃描來源")
+    if not run_scan:
+        return
 
-    universe = load_universe()
-    universe["serenity_score"] = universe.apply(serenity_score, axis=1)
-    universe["action"] = universe.apply(lambda r: action_band(r["serenity_score"], r["risk_level"]), axis=1)
+    urls = [line.strip() for line in source_text.splitlines() if line.strip()]
+    known_full = set(universe["ticker"].str.upper())
+    known_short = set(universe["ticker"].str.replace(r"\..*$", "", regex=True).str.upper())
+    scan = scan_sources(urls, known_full | known_short)
+    known = known_full | known_short
+    if scan.empty:
+        st.warning("沒有找到 ticker。可以換來源或加入更明確的 ticker 文字。")
+    else:
+        scan["known_in_universe"] = scan["ticker"].str.upper().isin(known)
+        st.dataframe(scan.head(80), use_container_width=True, hide_index=True)
 
+
+def render_ticker_detail(universe: pd.DataFrame, filtered: pd.DataFrame) -> None:
+    st.subheader("個股細節")
+    options = filtered["ticker"].tolist() if not filtered.empty else universe["ticker"].tolist()
+    selected = st.selectbox("選擇 ticker", options)
+    row = universe[universe["ticker"] == selected].iloc[0]
+    left, right = st.columns([1, 2])
+    snap = fetch_yahoo_snapshot(selected)
+    with left:
+        st.metric("Serenity 分數", f"{serenity_score(row):.1f}")
+        st.metric("價格", format_money(snap.price), format_pct(snap.change_pct))
+        st.metric("市值", format_money(snap.market_cap))
+        st.write(f"行動分類：{action_band(serenity_score(row), row['risk_level'])}")
+        st.write(f"風險：{int(row['risk_level'])}/5")
+    with right:
+        st.markdown(f"### {row['name']}")
+        st.write(row["thesis"])
+        chart = fetch_yahoo_history(selected)
+        if not chart.empty:
+            st.line_chart(chart.set_index("date")["close"])
+        else:
+            st.warning("Yahoo Finance 無法取得這個 ticker 的歷史價格。")
+
+
+def render_methodology() -> None:
+    st.subheader("方法論")
+    st.markdown(
+        """
+        這個網站分成兩層：
+
+        1. **市場健康指數 MHI**：判斷現在該進攻、防守或等待。
+        2. **Serenity Radar**：在市場狀態允許時，尋找供應鏈瓶頸型股票。
+
+        MHI 使用即時市場代理資料，但不是醫學儀器，也不是投資建議。它的用途是把分散的市場訊號轉成一個可重複檢查的框架。
+        """
+    )
+    st.dataframe(market_health.factor_weights_frame(), use_container_width=True, hide_index=True)
+    st.markdown(
+        """
+        核心判斷問題：
+
+        - 市場現在健康、亞健康、發炎，還是急症？
+        - 上漲是基本面、流動性還是情緒推動？
+        - 風險是短期波動，還是信用與槓桿的結構問題？
+        - 如果判斷錯了，哪個訊號代表要退出？
+        """
+    )
+
+
+def sidebar_filters(universe: pd.DataFrame) -> pd.DataFrame:
     with st.sidebar:
         st.header("篩選")
         categories = ["全部"] + sorted(universe["category"].unique().tolist())
         category = st.selectbox("類別", categories)
         min_score = st.slider("最低 Serenity 分數", 0, 100, 45)
-        hide_scenario = st.checkbox("隱藏槓桿 / 情境工具", value=True)
+        hide_scenario = st.checkbox("隱藏 scenario 狀態", value=True)
         st.divider()
-        st.header("手動來源掃描")
-        source_text = st.text_area("URL，一行一個", "\n".join(DEFAULT_SOURCES), height=120)
-        run_scan = st.button("掃描貼上的來源")
+        st.header("說明")
+        st.caption("MHI 資料約快取 10 分鐘；Serenity 個股行情約快取 15 分鐘。")
 
     filtered = universe.copy()
     if category != "全部":
         filtered = filtered[filtered["category"] == category]
     if hide_scenario:
         filtered = filtered[filtered["status"].str.lower() != "scenario"]
-    filtered = filtered[filtered["serenity_score"] >= min_score].sort_values("serenity_score", ascending=False)
+    return filtered[filtered["serenity_score"] >= min_score].sort_values("serenity_score", ascending=False)
 
-    top = filtered.head(5)
-    cols = st.columns(5)
-    for col, (_, row) in zip(cols, top.iterrows()):
-        snap = fetch_yahoo_snapshot(row["ticker"])
-        col.metric(row["ticker"], f"{row['serenity_score']:.1f}", delta=format_pct(snap.change_pct), help=row["thesis"])
 
-    tab_radar, tab_auto, tab_manual, tab_detail, tab_method = st.tabs(
-        ["已知雷達", "自動掃描", "手動掃描", "標的細節", "方法論"]
+def main() -> None:
+    st.set_page_config(page_title="Market Health Radar", layout="wide")
+    inject_css()
+    st.title("Market Health Radar")
+    st.caption("用人體健康模型即時分析市場，再連到股票瓶頸雷達與動能策略。")
+
+    universe = load_universe()
+    universe["serenity_score"] = universe.apply(serenity_score, axis=1)
+    universe["action"] = universe.apply(lambda r: action_band(r["serenity_score"], r["risk_level"]), axis=1)
+    filtered = sidebar_filters(universe)
+
+    tab_market, tab_strategy, tab_radar, tab_auto, tab_manual, tab_detail, tab_method = st.tabs(
+        ["市場健康", "交易策略", "股票雷達", "Auto scan", "來源掃描", "個股細節", "方法論"]
     )
 
+    with tab_market:
+        render_market_health()
+    with tab_strategy:
+        render_momentum_strategy()
     with tab_radar:
-        table = filtered[
-            [
-                "ticker",
-                "name",
-                "category",
-                "layer",
-                "conviction",
-                "status",
-                "serenity_score",
-                "risk_level",
-                "action",
-                "thesis",
-            ]
-        ].copy()
-        st.dataframe(table, use_container_width=True, hide_index=True)
-
+        render_serenity_radar(universe, filtered)
     with tab_auto:
         render_auto_scan(universe)
-
     with tab_manual:
-        st.write("貼上公開網頁，系統會掃描 ticker 與 Serenity 風格關鍵字。")
-        if run_scan:
-            urls = [line.strip() for line in source_text.splitlines() if line.strip()]
-            known_full = set(universe["ticker"].str.upper())
-            known_short = set(universe["ticker"].str.replace(r"\..*$", "", regex=True).str.upper())
-            scan = scan_sources(urls, known_full | known_short)
-            known = known_full | known_short
-            if scan.empty:
-                st.warning("沒有找到 ticker。來源可能阻擋抓取，或需要登入。")
-            else:
-                scan["known_in_universe"] = scan["ticker"].str.upper().isin(known)
-                st.dataframe(scan.head(80), use_container_width=True, hide_index=True)
-        else:
-            st.caption("按「掃描貼上的來源」後，才會讀取公開頁面。")
-
+        render_manual_scan(universe)
     with tab_detail:
-        selected = st.selectbox("選擇標的", filtered["ticker"].tolist() if not filtered.empty else universe["ticker"].tolist())
-        row = universe[universe["ticker"] == selected].iloc[0]
-        left, right = st.columns([1, 2])
-        snap = fetch_yahoo_snapshot(selected)
-        with left:
-            st.metric("Serenity 分數", f"{serenity_score(row):.1f}")
-            st.metric("價格", format_money(snap.price), format_pct(snap.change_pct))
-            st.metric("市值", format_money(snap.market_cap))
-            st.write(f"行動分類：{action_band(serenity_score(row), row['risk_level'])}")
-            st.write(f"風險：{int(row['risk_level'])}/5")
-        with right:
-            st.subheader(row["name"])
-            st.write(row["thesis"])
-            chart = fetch_yahoo_history(selected)
-            if not chart.empty:
-                st.line_chart(chart.set_index("date")["close"])
-            else:
-                st.warning("Yahoo Finance 沒有回傳這個 ticker 的歷史價格。")
-
+        render_ticker_detail(universe, filtered)
     with tab_method:
         render_methodology()
-        st.subheader("檔案")
-        st.write(f"已知 Serenity universe：{DATA_FILE}")
-        st.write(f"自動掃描候選池：{scanner.CANDIDATE_FILE}")
-        st.write(f"自動掃描輸出：{AUTO_SCAN_FILE}")
 
 
 if __name__ == "__main__":
